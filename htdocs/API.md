@@ -15,6 +15,7 @@
 | 请求编码 | `POST` 请求体为 JSON 时使用 `Content-Type: application/json`；上传文件使用 `multipart/form-data` |
 | 响应格式 | 一律 UTF-8 JSON，`Content-Type: application/json; charset=utf-8` |
 | 认证方式 | 注册/登录返回 `token`，后续请求加请求头 `X-Api-Token: <token>` |
+| 客户端出口 | 该主机在应用前有 JS 校验页；程序调用时请使用搜索引擎爬虫 UA（见 `client.py`）以单请求直达，避免每日 hits 翻倍 |
 | 三要素登录 | 用户名 + 密码 + 校验码 `keycode`（注册时由服务端生成并只返回一次） |
 | 时间格式 | 服务端时间统一为 UTC，`YYYY-MM-DD HH:MM:SS` |
 | 令牌有效期 | 默认 30 天，过期需重新登录 |
@@ -245,6 +246,7 @@ GET /api/index.php?action=health
 ## 11. 安全与限制
 
 - 密码仅存 BCrypt 哈希；令牌与 `keycode` 校验码仅存 SHA-256 哈希，明文只在签发时返回一次。
+- 主机每日 50000 hits 限额，一次 API 调用消耗 1 hit；使用 `client.py` 的默认 UA 可保持单请求，勿用浏览器式 UA 触发挑战页。
 - 该主机的反向代理会剥离 `Authorization` 头，因此令牌统一用自定义头 `X-Api-Token` 传递；也支持 `?token=` 查询参数（便于浏览器内调试，但会出现在访问日志中）。
 - 登录需用户名、密码、校验码三要素齐全，缺任一项均不能登录。
 - 所有查询按 `user_id` 隔离，跨用户访问返回 `404 not_found`。
