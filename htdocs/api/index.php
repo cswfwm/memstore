@@ -176,19 +176,22 @@ function action_upload(): void
         respond(400, ['error' => 'upload_failed', 'message' => $problem]);
     }
 
-    $category = sanitize_category(request_param([], 'category', 'general'));
-    $title = request_param([], 'title');
-    $tags = request_param([], 'tags');
-    $source = request_param([], 'source', 'file');
+    $isJson = stripos($_SERVER['CONTENT_TYPE'] ?? '', 'application/json') !== false;
+    $jsonBody = $isJson ? read_json_body() : [];
+
+    $category = sanitize_category(request_param($jsonBody, 'category', 'general'));
+    $title = request_param($jsonBody, 'title');
+    $tags = request_param($jsonBody, 'tags');
+    $source = request_param($jsonBody, 'source', 'file');
 
     if ($source === 'text') {
-        $text = request_param([], 'content');
+        $text = request_param($jsonBody, 'content');
         if ($text === '') {
             respond(422, ['error' => 'missing_content', 'message' => "source=text 时必须提供 content"]);
         }
         $tmp = tempnam(sys_get_temp_dir(), 'mem');
         file_put_contents($tmp, $text);
-        $fileName = request_param([], 'filename', 'note.txt');
+        $fileName = request_param($jsonBody, 'filename', 'note.txt');
         $mime = 'text/plain';
         $streamPath = $tmp;
         $cleanup = true;
@@ -265,7 +268,10 @@ function action_upload(): void
 
 function upload_input_problem(): string
 {
-    if (!isset($_FILES['file']) && request_param([], 'source', 'file') === 'file') {
+    if (stripos($_SERVER['CONTENT_TYPE'] ?? '', 'application/json') !== false) {
+        return '';
+    }
+    if (!isset($_FILES['file'])) {
         $len = (int)($_SERVER['CONTENT_LENGTH'] ?? 0);
         if ($len > 0 && empty($_POST) && empty($_FILES)) {
             return '请求体超过 post_max_size（' . ini_get('post_max_size') . '）';
