@@ -1,0 +1,5 @@
+htdocs/config.php
+htdocs/storage/*
+!htdocs/storage/.htaccess
+*.log
+.deploy.env

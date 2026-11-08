@@ -1,0 +1,388 @@
+<?php
+declare(strict_types=1);
+
+require __DIR__ . '/../lib/bootstrap.php';
+
+$action = $_GET['action'] ?? '';
+$method = $_SERVER['REQUEST_METHOD'];
+
+if ($action === 'health') {
+    respond(200, ['ok' => true, 'service' => 'memstore', 'version' => '1.0.0', 'time' => now_utc()]);
+}
+
+if ($action === 'install') {
+    install_schema();
+}
+
+if ($action === 'register' && $method === 'POST') {
+    action_register();
+}
+
+if ($action === 'login' && $method === 'POST') {
+    action_login();
+}
+
+if ($action === 'upload' && $method === 'POST') {
+    action_upload();
+}
+
+if ($action === 'list' && $method === 'GET') {
+    action_list();
+}
+
+if ($action === 'file' && $method === 'GET') {
+    action_file();
+}
+
+if ($action === 'delete' && $method === 'POST') {
+    action_delete();
+}
+
+if ($action === 'me' && $method === 'GET') {
+    $user = require_user(db());
+    respond(200, ['user' => ['id' => (int)$user['id'], 'username' => $user['username'], 'service_name' => $user['service_name']]]);
+}
+
+respond(404, ['error' => 'unknown_action', 'message' => '未知的 action，请参阅 /api.md']);
+
+
+function install_schema(): void
+{
+    $key = request_param([], 'key');
+    if ($key === '' || !hash_equals((string)$GLOBALS['config']['install_key'], $key)) {
+        respond(403, ['error' => 'forbidden', 'message' => 'install key 不正确']);
+    }
+
+    $pdo = db();
+    $pdo->exec(
+        "CREATE TABLE IF NOT EXISTS users (
+            id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+            username VARCHAR(64) NOT NULL,
+            service_name VARCHAR(120) NOT NULL,
+            password_hash VARCHAR(255) NOT NULL,
+            created_at DATETIME NOT NULL,
+            PRIMARY KEY (id),
+            UNIQUE KEY uniq_username (username)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+    );
+    $pdo->exec(
+        "CREATE TABLE IF NOT EXISTS api_tokens (
+            id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+            user_id INT UNSIGNED NOT NULL,
+            token_hash CHAR(64) NOT NULL,
+            created_at DATETIME NOT NULL,
+            expires_at DATETIME NOT NULL,
+            last_used_at DATETIME NULL,
+            PRIMARY KEY (id),
+            UNIQUE KEY uniq_token (token_hash),
+            KEY idx_user (user_id),
+            CONSTRAINT fk_tokens_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+    );
+    $pdo->exec(
+        "CREATE TABLE IF NOT EXISTS memories (
+            id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+            user_id INT UNSIGNED NOT NULL,
+            uuid CHAR(36) NOT NULL,
+            title VARCHAR(200) NOT NULL,
+            category VARCHAR(32) NOT NULL,
+            tags VARCHAR(255) NOT NULL DEFAULT '',
+            mime_type VARCHAR(120) NOT NULL,
+            size_bytes INT UNSIGNED NOT NULL,
+            orig_name VARCHAR(200) NOT NULL,
+            stored_path VARCHAR(255) NOT NULL,
+            sha256 CHAR(64) NOT NULL,
+            created_at DATETIME NOT NULL,
+            PRIMARY KEY (id),
+            UNIQUE KEY uniq_uuid (uuid),
+            KEY idx_user_cat (user_id, category, created_at),
+            CONSTRAINT fk_mem_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+    );
+
+    respond(200, ['ok' => true, 'message' => '数据表已创建']);
+}
+
+function action_register(): void
+{
+    $body = read_json_body();
+    $username = request_param($body, 'username');
+    $password = request_param($body, 'password');
+    $service = request_param($body, 'service_name');
+
+    if (!preg_match('/^[a-zA-Z0-9_.-]{3,64}$/', $username)) {
+        respond(422, ['error' => 'invalid_username', 'message' => '用户名需为 3-64 位字母数字或 _ . -']);
+    }
+    if (strlen($password) < 8) {
+        respond(422, ['error' => 'weak_password', 'message' => '密码至少 8 位']);
+    }
+    if ($service === '') {
+        respond(422, ['error' => 'missing_service_name', 'message' => 'service_name 不能为空（填写调用方 AI 服务名称）']);
+    }
+
+    $pdo = db();
+    $exists = $pdo->prepare('SELECT id FROM users WHERE username = ?');
+    $exists->execute([$username]);
+    if ($exists->fetch()) {
+        respond(409, ['error' => 'username_taken', 'message' => '用户名已被占用']);
+    }
+
+    $stmt = $pdo->prepare('INSERT INTO users (username, service_name, password_hash, created_at) VALUES (?, ?, ?, ?)');
+    $stmt->execute([$username, mb_substr($service, 0, 120), password_hash($password, PASSWORD_DEFAULT), now_utc()]);
+    $userId = (int)$pdo->lastInsertId();
+
+    $token = issue_token($pdo, $userId);
+    respond(201, [
+        'user'  => ['id' => $userId, 'username' => $username, 'service_name' => $service],
+        'token' => $token['token'],
+        'token_expires_at' => $token['expires_at'],
+    ]);
+}
+
+function action_login(): void
+{
+    $body = read_json_body();
+    $username = request_param($body, 'username');
+    $password = request_param($body, 'password');
+
+    $pdo = db();
+    $stmt = $pdo->prepare('SELECT id, username, service_name, password_hash FROM users WHERE username = ?');
+    $stmt->execute([$username]);
+    $user = $stmt->fetch();
+
+    if (!$user || !password_verify($password, $user['password_hash'])) {
+        respond(401, ['error' => 'invalid_credentials', 'message' => '用户名或密码错误']);
+    }
+
+    $token = issue_token($pdo, (int)$user['id']);
+    respond(200, [
+        'user'  => ['id' => (int)$user['id'], 'username' => $user['username'], 'service_name' => $user['service_name']],
+        'token' => $token['token'],
+        'token_expires_at' => $token['expires_at'],
+    ]);
+}
+
+function action_upload(): void
+{
+    $user = require_user(db());
+    $pdo = db();
+
+    if ((int)($user['id']) <= 0) {
+        respond(401, ['error' => 'unauthorized']);
+    }
+
+    $problem = upload_input_problem();
+    if ($problem !== '') {
+        respond(400, ['error' => 'upload_failed', 'message' => $problem]);
+    }
+
+    $category = sanitize_category(request_param([], 'category', 'general'));
+    $title = request_param([], 'title');
+    $tags = request_param([], 'tags');
+    $source = request_param([], 'source', 'file');
+
+    if ($source === 'text') {
+        $text = request_param([], 'content');
+        if ($text === '') {
+            respond(422, ['error' => 'missing_content', 'message' => "source=text 时必须提供 content"]);
+        }
+        $tmp = tempnam(sys_get_temp_dir(), 'mem');
+        file_put_contents($tmp, $text);
+        $fileName = request_param([], 'filename', 'note.txt');
+        $mime = 'text/plain';
+        $streamPath = $tmp;
+        $cleanup = true;
+        $size = filesize($streamPath);
+    } else {
+        $file = $_FILES['file'] ?? null;
+        if (!$file || !is_array($file) || ($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+            respond(422, ['error' => 'missing_file', 'message' => '缺少上传文件字段 file']);
+        }
+        $streamPath = $file['tmp_name'];
+        $fileName = (string)basename($file['name']);
+        $size = (int)$file['size'];
+        $cleanup = false;
+        $mime = detect_mime($streamPath, $fileName);
+    }
+
+    $maxBytes = (int)$GLOBALS['config']['max_upload'];
+    if ($size <= 0) {
+        respond(422, ['error' => 'empty_file', 'message' => '文件为空']);
+    }
+    if ($size > $maxBytes) {
+        respond(413, ['error' => 'file_too_large', 'message' => '文件超过 ' . round($maxBytes / 1048576) . ' MB 限制']);
+    }
+
+    if ($title === '') {
+        $title = mb_substr(pathinfo($fileName, PATHINFO_FILENAME), 0, 200);
+    }
+
+    $uuid = uuid4();
+    $ext = safe_extension($fileName, $mime);
+    $relDir = date('Y/m');
+    $dir = STORAGE_DIR . '/' . $relDir . '/' . $category;
+    if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) {
+        respond(500, ['error' => 'storage_error', 'message' => '存储目录创建失败']);
+    }
+
+    $storedName = $uuid . ($ext !== '' ? '.' . $ext : '');
+    $relPath = $relDir . '/' . $category . '/' . $storedName;
+    $dest = STORAGE_DIR . '/' . $relPath;
+
+    if (!move_uploaded_file_safe($streamPath, $dest)) {
+        respond(500, ['error' => 'storage_error', 'message' => '文件写入失败']);
+    }
+    if ($cleanup) {
+        @unlink($streamPath);
+    }
+
+    $sha = hash_file('sha256', $dest);
+
+    $stmt = $pdo->prepare(
+        'INSERT INTO memories (user_id, uuid, title, category, tags, mime_type, size_bytes, orig_name, stored_path, sha256, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    );
+    $stmt->execute([
+        (int)$user['id'], $uuid, mb_substr($title, 0, 200), $category,
+        mb_substr($tags, 0, 255), $mime, $size, mb_substr($fileName, 0, 200),
+        $relPath, $sha, now_utc(),
+    ]);
+
+    respond(201, [
+        'memory' => [
+            'uuid'       => $uuid,
+            'title'      => $title,
+            'category'   => $category,
+            'tags'       => $tags,
+            'mime_type'  => $mime,
+            'size_bytes' => $size,
+            'sha256'     => $sha,
+            'created_at' => now_utc(),
+            'download_url' => base_url() . '/api/index.php?action=file&uuid=' . $uuid,
+        ],
+    ]);
+}
+
+function upload_input_problem(): string
+{
+    if (!isset($_FILES['file']) && request_param([], 'source', 'file') === 'file') {
+        $len = (int)($_SERVER['CONTENT_LENGTH'] ?? 0);
+        if ($len > 0 && empty($_POST) && empty($_FILES)) {
+            return '请求体超过 post_max_size（' . ini_get('post_max_size') . '）';
+        }
+    }
+    return '';
+}
+
+function move_uploaded_file_safe(string $src, string $dest): bool
+{
+    if (is_uploaded_file($src)) {
+        return move_uploaded_file($src, $dest);
+    }
+    // source=text 生成的临时文件不是上传文件，用流拷贝
+    return copy($src, $dest);
+}
+
+function detect_mime(string $path, string $name): string
+{
+    if (function_exists('finfo_open')) {
+        $fi = finfo_open(FILEINFO_MIME_TYPE);
+        if ($fi) {
+            $mime = finfo_file($fi, $path) ?: '';
+            finfo_close($fi);
+            if ($mime !== '') {
+                return $mime;
+            }
+        }
+    }
+    $ext = strtolower(pathinfo($name, PATHINFO_EXTENSION));
+    $map = ['txt' => 'text/plain', 'md' => 'text/markdown', 'json' => 'application/json', 'png' => 'image/png', 'jpg' => 'image/jpeg', 'jpeg' => 'image/jpeg'];
+    return $map[$ext] ?? 'application/octet-stream';
+}
+
+function action_list(): void
+{
+    $user = require_user(db());
+    $pdo = db();
+
+    $category = request_param([], 'category');
+    $limit = max(1, min(100, (int)request_param([], 'limit', '20')));
+    $offset = max(0, (int)request_param([], 'offset', '0'));
+
+    $sql = 'SELECT uuid, title, category, tags, mime_type, size_bytes, orig_name, created_at FROM memories WHERE user_id = ?';
+    $params = [(int)$user['id']];
+    if ($category !== '') {
+        $sql .= ' AND category = ?';
+        $params[] = sanitize_category($category);
+    }
+    $sql .= ' ORDER BY id DESC LIMIT ' . $limit . ' OFFSET ' . $offset;
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    $rows = $stmt->fetchAll();
+
+    foreach ($rows as &$row) {
+        $row['size_bytes'] = (int)$row['size_bytes'];
+        $row['download_url'] = base_url() . '/api/index.php?action=file&uuid=' . $row['uuid'];
+    }
+
+    respond(200, ['total_returned' => count($rows), 'limit' => $limit, 'offset' => $offset, 'items' => $rows]);
+}
+
+function action_file(): void
+{
+    $user = require_user(db());
+    $pdo = db();
+    $uuid = request_param([], 'uuid');
+    if (!preg_match('/^[0-9a-f-]{36}$/', $uuid)) {
+        respond(422, ['error' => 'invalid_uuid', 'message' => 'uuid 格式不正确']);
+    }
+
+    $stmt = $pdo->prepare('SELECT * FROM memories WHERE uuid = ? AND user_id = ? LIMIT 1');
+    $stmt->execute([$uuid, (int)$user['id']]);
+    $row = $stmt->fetch();
+    if (!$row) {
+        respond(404, ['error' => 'not_found', 'message' => '记录不存在或无权访问']);
+    }
+
+    $path = STORAGE_DIR . '/' . $row['stored_path'];
+    $real = realpath($path);
+    $base = realpath(STORAGE_DIR);
+    if ($real === false || $base === false || strncmp($real, $base . DIRECTORY_SEPARATOR, strlen($base) + 1) !== 0) {
+        respond(404, ['error' => 'not_found', 'message' => '文件不存在']);
+    }
+
+    header('Content-Type: ' . $row['mime_type']);
+    header('Content-Length: ' . filesize($real));
+    header('Content-Disposition: attachment; filename="' . rawurlencode($row['orig_name']) . '"');
+    header('X-Content-Type-Options: nosniff');
+    readfile($real);
+    exit;
+}
+
+function action_delete(): void
+{
+    $user = require_user(db());
+    $pdo = db();
+    $uuid = request_param(read_json_body(), 'uuid');
+    if (!preg_match('/^[0-9a-f-]{36}$/', $uuid)) {
+        respond(422, ['error' => 'invalid_uuid', 'message' => 'uuid 格式不正确']);
+    }
+
+    $stmt = $pdo->prepare('SELECT id, stored_path FROM memories WHERE uuid = ? AND user_id = ? LIMIT 1');
+    $stmt->execute([$uuid, (int)$user['id']]);
+    $row = $stmt->fetch();
+    if (!$row) {
+        respond(404, ['error' => 'not_found', 'message' => '记录不存在或无权访问']);
+    }
+
+    $pdo->prepare('DELETE FROM memories WHERE id = ?')->execute([(int)$row['id']]);
+    $path = STORAGE_DIR . '/' . $row['stored_path'];
+    $real = realpath($path);
+    $base = realpath(STORAGE_DIR);
+    if ($real !== false && $base !== false && strncmp($real, $base . DIRECTORY_SEPARATOR, strlen($base) + 1) === 0) {
+        @unlink($real);
+    }
+
+    respond(200, ['ok' => true, 'deleted' => $uuid]);
+}
