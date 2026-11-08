@@ -3,3 +3,5 @@ htdocs/storage/*
 !htdocs/storage/.htaccess
 *.log
 .deploy.env
+__pycache__/
+*.pyc
