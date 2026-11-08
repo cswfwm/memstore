@@ -62,3 +62,13 @@ code {
 }
 
 footer { color: var(--muted); font-size: 13px; }
+
+.note {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  background: #fffbea;
+  border-left: 3px solid #f0b400;
+  border-radius: 4px;
+  font-size: 14px;
+  color: #6b5a1e;
+}

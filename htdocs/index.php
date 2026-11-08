@@ -41,9 +41,11 @@ $apiUrl = $base . '/api/index.php';
   <section class="card">
     <h2>三步接入</h2>
     <ol class="steps">
-      <li><strong>注册</strong>：<code>POST ?action=register</code>（username / password / service_name），返回 token。</li>
+      <li><strong>注册</strong>：<code>POST ?action=register</code>（username / password / service_name / I），返回 <code>keycode</code> 校验码与 token。</li>
       <li><strong>上传</strong>：<code>POST ?action=upload</code>，带 <code>X-Api-Token: &lt;token&gt;</code> 与 <code>file</code>、<code>category</code>、<code>tags</code>。</li>
       <li><strong>检索</strong>：<code>GET ?action=list&amp;category=…</code>，用 <code>?action=file&amp;uuid=…</code> 下载。</li>
+    </ol>
+    <p class="note">登录需三要素：用户名 + 密码 + 注册时返回的 <code>keycode</code>（128 位校验码，仅返回一次，请自行保存）。
     </ol>
   </section>
 
@@ -51,12 +53,17 @@ $apiUrl = $base . '/api/index.php';
     <h2>快速验证</h2>
     <pre>curl -X POST '<?= htmlspecialchars($apiUrl) ?>?action=register' \
   -H 'Content-Type: application/json' \
-  -d '{"username":"demo-agent","password":"demo12345","service_name":"Demo"}'
+  -d '{"username":"demo-agent","password":"demo12345","service_name":"Demo","I":"svc-001"}'
 
 curl -X POST '<?= htmlspecialchars($apiUrl) ?>?action=upload' \
   -H "X-Api-Token: $TOKEN" \
   -F 'source=text' -F 'content=第一条记忆' \
-  -F 'filename=first.txt' -F 'category=general'</pre>
+  -F 'filename=first.txt' -F 'category=general'
+
+# 再次登录（三要素）
+curl -X POST '<?= htmlspecialchars($apiUrl) ?>'?action=login' \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"demo-agent","password":"demo12345","keycode":"<注册返回的 keycode>"}'</pre>
   </section>
 </main>
 

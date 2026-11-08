@@ -40,7 +40,12 @@ if ($action === 'delete' && $method === 'POST') {
 
 if ($action === 'me' && $method === 'GET') {
     $user = require_user(db());
-    respond(200, ['user' => ['id' => (int)$user['id'], 'username' => $user['username'], 'service_name' => $user['service_name']]]);
+    respond(200, ['user' => [
+        'id' => (int)$user['id'],
+        'username' => $user['username'],
+        'service_name' => $user['service_name'],
+        'I' => $user['caller_id'],
+    ]]);
 }
 
 respond(404, ['error' => 'unknown_action', 'message' => '未知的 action，请参阅 /api.md']);
@@ -60,11 +65,30 @@ function install_schema(): void
             username VARCHAR(64) NOT NULL,
             service_name VARCHAR(120) NOT NULL,
             password_hash VARCHAR(255) NOT NULL,
+            keycode_hash CHAR(64) NOT NULL,
+            caller_id VARCHAR(64) NOT NULL,
             created_at DATETIME NOT NULL,
             PRIMARY KEY (id),
             UNIQUE KEY uniq_username (username)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
     );
+    $col = $pdo->prepare(
+        "SELECT COUNT(*) FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'keycode_hash'"
+    );
+    $col->execute();
+    if ((int)$col->fetchColumn() === 0) {
+        $pdo->exec("ALTER TABLE users ADD COLUMN keycode_hash CHAR(64) NOT NULL DEFAULT ''");
+    }
+    $col2 = $pdo->prepare(
+        "SELECT COUNT(*) FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'caller_id'"
+    );
+    $col2->execute();
+    if ((int)$col2->fetchColumn() === 0) {
+        $pdo->exec("ALTER TABLE users ADD COLUMN caller_id VARCHAR(64) NOT NULL DEFAULT ''");
+    }
+
     $pdo->exec(
         "CREATE TABLE IF NOT EXISTS api_tokens (
             id INT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -109,6 +133,7 @@ function action_register(): void
     $username = request_param($body, 'username');
     $password = request_param($body, 'password');
     $service = request_param($body, 'service_name');
+    $callerId = request_param($body, 'I');
 
     if (!preg_match('/^[a-zA-Z0-9_.-]{3,64}$/', $username)) {
         respond(422, ['error' => 'invalid_username', 'message' => '用户名需为 3-64 位字母数字或 _ . -']);
@@ -119,6 +144,9 @@ function action_register(): void
     if ($service === '') {
         respond(422, ['error' => 'missing_service_name', 'message' => 'service_name 不能为空（填写调用方 AI 服务名称）']);
     }
+    if (!preg_match('/^[a-zA-Z0-9_.:-]{1,64}$/', $callerId)) {
+        respond(422, ['error' => 'invalid_caller_id', 'message' => '字段 I 必填，1-64 位字母数字或 _ . : -']);
+    }
 
     $pdo = db();
     $exists = $pdo->prepare('SELECT id FROM users WHERE username = ?');
@@ -127,13 +155,19 @@ function action_register(): void
         respond(409, ['error' => 'username_taken', 'message' => '用户名已被占用']);
     }
 
-    $stmt = $pdo->prepare('INSERT INTO users (username, service_name, password_hash, created_at) VALUES (?, ?, ?, ?)');
-    $stmt->execute([$username, mb_substr($service, 0, 120), password_hash($password, PASSWORD_DEFAULT), now_utc()]);
+    $keycode = bin2hex(random_bytes(16));
+
+    $stmt = $pdo->prepare('INSERT INTO users (username, service_name, password_hash, keycode_hash, caller_id, created_at) VALUES (?, ?, ?, ?, ?, ?)');
+    $stmt->execute([
+        $username, mb_substr($service, 0, 120), password_hash($password, PASSWORD_DEFAULT),
+        hash('sha256', $keycode), $callerId, now_utc(),
+    ]);
     $userId = (int)$pdo->lastInsertId();
 
     $token = issue_token($pdo, $userId);
     respond(201, [
-        'user'  => ['id' => $userId, 'username' => $username, 'service_name' => $service],
+        'user'  => ['id' => $userId, 'username' => $username, 'service_name' => $service, 'I' => $callerId],
+        'keycode' => $keycode,
         'token' => $token['token'],
         'token_expires_at' => $token['expires_at'],
     ]);
@@ -144,19 +178,27 @@ function action_login(): void
     $body = read_json_body();
     $username = request_param($body, 'username');
     $password = request_param($body, 'password');
+    $keycode = strtolower(request_param($body, 'keycode'));
+
+    if ($keycode === '') {
+        respond(422, ['error' => 'missing_keycode', 'message' => '缺少 keycode（注册时返回的 128 位校验码）']);
+    }
 
     $pdo = db();
-    $stmt = $pdo->prepare('SELECT id, username, service_name, password_hash FROM users WHERE username = ?');
+    $stmt = $pdo->prepare('SELECT id, username, service_name, caller_id, password_hash, keycode_hash FROM users WHERE username = ?');
     $stmt->execute([$username]);
     $user = $stmt->fetch();
 
     if (!$user || !password_verify($password, $user['password_hash'])) {
         respond(401, ['error' => 'invalid_credentials', 'message' => '用户名或密码错误']);
     }
+    if (!hash_equals((string)$user['keycode_hash'], hash('sha256', $keycode))) {
+        respond(401, ['error' => 'invalid_keycode', 'message' => '校验码不正确']);
+    }
 
     $token = issue_token($pdo, (int)$user['id']);
     respond(200, [
-        'user'  => ['id' => (int)$user['id'], 'username' => $user['username'], 'service_name' => $user['service_name']],
+        'user'  => ['id' => (int)$user['id'], 'username' => $user['username'], 'service_name' => $user['service_name'], 'I' => $user['caller_id']],
         'token' => $token['token'],
         'token_expires_at' => $token['expires_at'],
     ]);

@@ -1,3 +1,7 @@
+AddDefaultCharset UTF-8
+AddType "text/markdown; charset=UTF-8" .md
+AddType "application/json; charset=UTF-8" .json
+
 Options -Indexes
 
 <FilesMatch "^config(\.sample)?\.php$">

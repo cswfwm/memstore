@@ -26,7 +26,7 @@ function current_user(PDO $pdo): ?array
     }
 
     $stmt = $pdo->prepare(
-        'SELECT t.id AS token_id, t.expires_at, u.id, u.username, u.service_name
+        'SELECT t.id AS token_id, t.expires_at, u.id, u.username, u.service_name, u.caller_id
          FROM api_tokens t JOIN users u ON u.id = t.user_id
          WHERE t.token_hash = ? LIMIT 1'
     );

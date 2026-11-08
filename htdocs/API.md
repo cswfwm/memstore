@@ -15,6 +15,7 @@
 | 请求编码 | `POST` 请求体为 JSON 时使用 `Content-Type: application/json`；上传文件使用 `multipart/form-data` |
 | 响应格式 | 一律 UTF-8 JSON，`Content-Type: application/json; charset=utf-8` |
 | 认证方式 | 注册/登录返回 `token`，后续请求加请求头 `X-Api-Token: <token>` |
+| 三要素登录 | 用户名 + 密码 + 校验码 `keycode`（注册时由服务端生成并只返回一次） |
 | 时间格式 | 服务端时间统一为 UTC，`YYYY-MM-DD HH:MM:SS` |
 | 令牌有效期 | 默认 30 天，过期需重新登录 |
 
@@ -41,7 +42,8 @@ Content-Type: application/json
 {
   "username": "my-ai-agent",
   "password": "至少8位密码",
-  "service_name": "My AI Service"
+  "service_name": "My AI Service",
+  "I": "svc-aicode-001"
 }
 ```
 
@@ -50,18 +52,22 @@ Content-Type: application/json
 | `username` | 是 | 3–64 位，允许字母、数字、`_`、`.`、`-`，全局唯一 |
 | `password` | 是 | 至少 8 位，服务端只存 BCrypt 哈希 |
 | `service_name` | 是 | 调用方名称，最长 120 字，便于区分不同 AI 服务 |
+| `I` | 是 | 调用方标识，1–64 位字母数字或 `_` `:` `.` `-`，随账号保存并在登录响应中回显 |
 
 成功 `201`：
 
 ```json
 {
-  "user": { "id": 1, "username": "my-ai-agent", "service_name": "My AI Service" },
+  "user": { "id": 1, "username": "my-ai-agent", "service_name": "My AI Service", "I": "svc-aicode-001" },
+  "keycode": "7f4fad0e40dbb5188d25abb97fa03023",
   "token": "64位十六进制字符串",
   "token_expires_at": "2026-12-08 15:00:00"
 }
 ```
 
-注册时即签发令牌，可直接上传。
+**`keycode` 是 128 位校验码（32 位十六进制，等价 128 bit），只在注册响应中返回这一次**，服务端仅存其 SHA-256 哈希，无法找回。调用方必须立即持久化保存，登录时必填。丢失校验码的账号无法登录，只能重新注册其他用户名。
+
+注册时同时签发令牌，可直接上传。
 
 ## 3. 登录
 
@@ -71,10 +77,20 @@ Content-Type: application/json
 ```
 
 ```json
-{ "username": "my-ai-agent", "password": "至少8位密码" }
+{ "username": "my-ai-agent", "password": "至少8位密码", "keycode": "7f4fad0e40dbb5188d25abb97fa03023" }
 ```
 
-成功 `200`，返回结构同注册。每次登录签发新令牌，旧令牌仍然有效直至过期。
+| 字段 | 必填 | 说明 |
+| --- | --- | --- |
+| `username` | 是 | 注册时的用户名 |
+| `password` | 是 | 注册时的密码 |
+| `keycode` | 是 | 注册时返回的 128 位校验码 |
+
+成功 `200`，返回同注册结构（`keycode` 字段不再返回，token 为新签发）。
+
+错误：缺少校验码返回 `422 missing_keycode`；校验码错误返回 `401 invalid_keycode`；用户名或密码错误返回 `401 invalid_credentials`。
+
+每次登录签发新令牌，旧令牌仍然有效直至过期。
 
 ## 4. 上传记忆
 
@@ -221,15 +237,16 @@ GET /api/index.php?action=health
 ## 10. 调用方最小实现流程
 
 1. `health` 探活，确认服务可达。
-2. 首次使用 `register`，保存返回的 `token`；已有账号用 `login` 换取新 `token`。
+2. 首次使用 `register`（需带 `I`），**同时保存返回的 `keycode` 与 `token`**；已有账号用 `login`（用户名 + 密码 + `keycode`）换取新 `token`。
 3. 上传时按业务选择 `category`（例如 `session`、`preference`、`log`、`error`），并填写 `tags` 便于检索。
 4. 检索用 `list`，需要正文时用 `file` 下载。
 5. 令牌过期收到 `401 unauthorized` 时重新 `login`。
 
 ## 11. 安全与限制
 
-- 密码仅存 BCrypt 哈希；令牌仅存 SHA-256 哈希，明文只在签发时返回一次。
+- 密码仅存 BCrypt 哈希；令牌与 `keycode` 校验码仅存 SHA-256 哈希，明文只在签发时返回一次。
 - 该主机的反向代理会剥离 `Authorization` 头，因此令牌统一用自定义头 `X-Api-Token` 传递；也支持 `?token=` 查询参数（便于浏览器内调试，但会出现在访问日志中）。
+- 登录需用户名、密码、校验码三要素齐全，缺任一项均不能登录。
 - 所有查询按 `user_id` 隔离，跨用户访问返回 `404 not_found`。
 - 单文件上限 20 MB，主机磁盘配额 5 GB，单账号 1 个 MySQL 库。
 - 上传目录位于 Web 根下但被 `.htaccess` 拒绝直接访问；文件名一律用服务端生成的 UUID，不使用用户提供的名称落盘。

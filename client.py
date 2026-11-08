@@ -3,7 +3,10 @@
 
 用法：
   export MEMSTORE_USER=my-agent MEMSTORE_PASS=secret123
-  python3 client.py register --service "My AI Service"
+  python3 client.py register --service "My AI Service" --caller-id svc-aicode-001
+  # 注册返回的 keycode 只出现一次，请立即保存；之后登录必须提供
+  export MEMSTORE_KEYCODE=<注册返回的 keycode>
+  python3 client.py login
   python3 client.py upload --file ./notes.md --category session --tags agent,summary
   python3 client.py list --category session
   python3 client.py download --uuid <uuid> --out ./out.md
@@ -111,19 +114,30 @@ def need_creds():
     return user, pwd
 
 
+def need_keycode():
+    keycode = os.environ.get('MEMSTORE_KEYCODE', '').strip()
+    if not keycode:
+        sys.exit('请先设置环境变量 MEMSTORE_KEYCODE（注册时返回的 128 位校验码）')
+    return keycode
+
+
 def cmd_register(args):
     user, pwd = need_creds()
     status, body, _ = request('POST', 'register', data={
-        'username': user, 'password': pwd, 'service_name': args.service,
+        'username': user, 'password': pwd, 'service_name': args.service, 'I': args.caller_id,
     })
     print(status, json.dumps(body, ensure_ascii=False, indent=2))
     if status == 201:
-        print('\n保存好 token：', body.get('token'))
+        print('\n保存好 keycode（只返回一次，登录必填）：', body.get('keycode'))
+        print('保存好 token：', body.get('token'))
 
 
 def cmd_login(args):
     user, pwd = need_creds()
-    status, body, _ = request('POST', 'login', data={'username': user, 'password': pwd})
+    keycode = need_keycode()
+    status, body, _ = request('POST', 'login', data={
+        'username': user, 'password': pwd, 'keycode': keycode,
+    })
     print(status, json.dumps(body, ensure_ascii=False, indent=2))
 
 
@@ -175,7 +189,8 @@ def main():
     sub = parser.add_subparsers(dest='cmd', required=True)
 
     p = sub.add_parser('register')
-    p.add_argument('--service', required=True)
+    p.add_argument('--service', required=True, help='调用方服务名称')
+    p.add_argument('--caller-id', required=True, help='字段 I：调用方标识，1-64 位')
     p.set_defaults(func=cmd_register)
 
     p = sub.add_parser('login')
