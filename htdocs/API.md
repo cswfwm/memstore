@@ -1,6 +1,6 @@
 # MemStore 记忆存储服务 · 上传规范
 
-版本 1.0.0 · 服务地址 `http://wfwm.uuk.pp.ua/api/index.php`
+版本 1.0.0 · 服务地址 `http://cswfwm.ccwu.cc/api/index.php`
 
 本服务用于 AI 服务集中存放「记忆」文件：注册登录后，通过标准接口上传，文件按分类归档，可检索、下载、删除。
 
@@ -10,12 +10,13 @@
 
 | 项目 | 约定 |
 | --- | --- |
-| 基础地址 | `http://wfwm.uuk.pp.ua/api/index.php` |
+| 基础地址 | `http://cswfwm.ccwu.cc/api/index.php` |
 | 路由参数 | 所有接口用查询参数 `?action=<动作>` 指定 |
 | 请求编码 | `POST` 请求体为 JSON 时使用 `Content-Type: application/json`；上传文件使用 `multipart/form-data` |
 | 响应格式 | 一律 UTF-8 JSON，`Content-Type: application/json; charset=utf-8` |
 | 认证方式 | 注册/登录返回 `token`，后续请求加请求头 `X-Api-Token: <token>` |
 | 客户端出口 | 该主机在应用前有 JS 校验页；程序调用时请使用搜索引擎爬虫 UA（见 `client.py`）以单请求直达，避免每日 hits 翻倍 |
+| 独立域名 | 站点已绑定自有域名 `cswfwm.ccwu.cc`，NS 委派至 `ns1.uuk.pp.ua` / `ns2.uuk.pp.ua` |
 | 三要素登录 | 用户名 + 密码 + 校验码 `keycode`（注册时由服务端生成并只返回一次） |
 | 时间格式 | 服务端时间统一为 UTC，`YYYY-MM-DD HH:MM:SS` |
 | 令牌有效期 | 默认 30 天，过期需重新登录 |
@@ -114,7 +115,7 @@ Content-Type: multipart/form-data
 示例（上传文件）：
 
 ```bash
-curl -X POST 'http://wfwm.uuk.pp.ua/api/index.php?action=upload' \
+curl -X POST 'http://cswfwm.ccwu.cc/api/index.php?action=upload' \
   -H "X-Api-Token: $TOKEN" \
   -F 'file=@session-notes.md' \
   -F 'title=2026-11-08 会话记忆' \
@@ -125,7 +126,7 @@ curl -X POST 'http://wfwm.uuk.pp.ua/api/index.php?action=upload' \
 示例（直接上传文本，无需本地文件）：
 
 ```bash
-curl -X POST 'http://wfwm.uuk.pp.ua/api/index.php?action=upload' \
+curl -X POST 'http://cswfwm.ccwu.cc/api/index.php?action=upload' \
   -H "X-Api-Token: $TOKEN" \
   -F 'source=text' \
   -F 'content=用户偏好中文回复，习惯用 JavaScript。' \
@@ -146,7 +147,7 @@ curl -X POST 'http://wfwm.uuk.pp.ua/api/index.php?action=upload' \
     "size_bytes": 2048,
     "sha256": "…",
     "created_at": "2026-11-08 15:00:00",
-    "download_url": "http://wfwm.uuk.pp.ua/api/index.php?action=file&uuid=3f1c..."
+    "download_url": "http://cswfwm.ccwu.cc/api/index.php?action=file&uuid=3f1c..."
   }
 }
 ```
@@ -247,6 +248,7 @@ GET /api/index.php?action=health
 
 - 密码仅存 BCrypt 哈希；令牌与 `keycode` 校验码仅存 SHA-256 哈希，明文只在签发时返回一次。
 - 主机每日 50000 hits 限额，一次 API 调用消耗 1 hit；使用 `client.py` 的默认 UA 可保持单请求，勿用浏览器式 UA 触发挑战页。
+- 页面样式已内联进 HTML，首页不再额外请求 CSS，减少 hits 消耗。
 - 该主机的反向代理会剥离 `Authorization` 头，因此令牌统一用自定义头 `X-Api-Token` 传递；也支持 `?token=` 查询参数（便于浏览器内调试，但会出现在访问日志中）。
 - 登录需用户名、密码、校验码三要素齐全，缺任一项均不能登录。
 - 所有查询按 `user_id` 隔离，跨用户访问返回 `404 not_found`。

@@ -26,7 +26,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-BASE = os.environ.get('MEMSTORE_BASE', 'http://wfwm.uuk.pp.ua')
+BASE = os.environ.get('MEMSTORE_BASE', 'http://cswfwm.ccwu.cc')
 API = BASE + '/api/index.php'
 # 该 UA 可绕过主机前置 JS 校验，避免每次调用多消耗一个 hit
 UA = 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)'
