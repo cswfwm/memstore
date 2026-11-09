@@ -26,6 +26,10 @@ if ($action === 'upload' && $method === 'POST') {
     action_upload();
 }
 
+if ($action === 'batch_upload' && $method === 'POST') {
+    action_batch_upload();
+}
+
 if ($action === 'list' && $method === 'GET') {
     action_list();
 }
@@ -308,6 +312,99 @@ function action_upload(): void
     ]);
 }
 
+function action_batch_upload(): void
+{
+    $user = require_user(db());
+    $pdo = db();
+
+    $body = read_json_body();
+    $items = $body['items'] ?? null;
+    if (!is_array($items) || $items === []) {
+        respond(422, ['error' => 'missing_items', 'message' => 'items 必须是非空数组']);
+    }
+    if (count($items) > 50) {
+        respond(422, ['error' => 'too_many_items', 'message' => '单次最多 50 条']);
+    }
+
+    $maxBytes = (int)$GLOBALS['config']['max_upload'];
+    $maxTotal = $maxBytes * 4;
+    $created = [];
+    $failed = [];
+    $totalBytes = 0;
+
+    foreach ($items as $index => $item) {
+        if (!is_array($item)) {
+            $failed[] = ['index' => $index, 'error' => 'invalid_item'];
+            continue;
+        }
+
+        $text = trim((string)($item['content'] ?? ''));
+        if ($text === '') {
+            $failed[] = ['index' => $index, 'error' => 'missing_content'];
+            continue;
+        }
+
+        $size = strlen($text);
+        if ($size > $maxBytes) {
+            $failed[] = ['index' => $index, 'error' => 'file_too_large'];
+            continue;
+        }
+        $totalBytes += $size;
+        if ($totalBytes > $maxTotal) {
+            $failed[] = ['index' => $index, 'error' => 'batch_too_large'];
+            continue;
+        }
+
+        $category = sanitize_category((string)($item['category'] ?? 'general'));
+        $fileName = trim((string)($item['filename'] ?? '')) ?: 'note.txt';
+        $title = trim((string)($item['title'] ?? '')) ?: mb_substr(pathinfo($fileName, PATHINFO_FILENAME), 0, 200);
+        $tags = trim((string)($item['tags'] ?? ''));
+
+        $uuid = uuid4();
+        $ext = safe_extension($fileName, 'text/plain');
+        $relDir = date('Y/m');
+        $dir = STORAGE_DIR . '/' . $relDir . '/' . $category;
+        if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) {
+            $failed[] = ['index' => $index, 'error' => 'storage_error'];
+            continue;
+        }
+
+        $storedName = $uuid . ($ext !== '' ? '.' . $ext : '.txt');
+        $relPath = $relDir . '/' . $category . '/' . $storedName;
+        $dest = STORAGE_DIR . '/' . $relPath;
+
+        if (file_put_contents($dest, $text, LOCK_EX) === false) {
+            $failed[] = ['index' => $index, 'error' => 'storage_error'];
+            continue;
+        }
+        $sha = hash_file('sha256', $dest);
+
+        $stmt = $pdo->prepare(
+            'INSERT INTO memories (user_id, uuid, title, category, tags, mime_type, size_bytes, orig_name, stored_path, sha256, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        );
+        $stmt->execute([
+            (int)$user['id'], $uuid, mb_substr($title, 0, 200), $category,
+            mb_substr($tags, 0, 255), 'text/plain', $size, mb_substr($fileName, 0, 200),
+            $relPath, $sha, now_utc(),
+        ]);
+
+        $created[] = [
+            'index' => $index,
+            'uuid' => $uuid,
+            'title' => $title,
+            'category' => $category,
+        ];
+    }
+
+    respond(200, [
+        'created_count' => count($created),
+        'failed_count' => count($failed),
+        'created' => $created,
+        'failed' => $failed,
+    ]);
+}
+
 function upload_input_problem(): string
 {
     if (stripos($_SERVER['CONTENT_TYPE'] ?? '', 'application/json') !== false) {
@@ -374,7 +471,24 @@ function action_list(): void
         $row['download_url'] = base_url() . '/api/index.php?action=file&uuid=' . $row['uuid'];
     }
 
-    respond(200, ['total_returned' => count($rows), 'limit' => $limit, 'offset' => $offset, 'items' => $rows]);
+    $payload = ['total_returned' => count($rows), 'limit' => $limit, 'offset' => $offset, 'items' => $rows];
+    $json = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    $etag = '"' . hash('sha256', $json) . '"';
+
+    header('ETag: ' . $etag);
+    header('Cache-Control: private, max-age=0, must-revalidate');
+
+    $ifNoneMatch = trim((string)($_SERVER['HTTP_IF_NONE_MATCH'] ?? ''));
+    if ($ifNoneMatch !== '' && $ifNoneMatch === $etag) {
+        http_response_code(304);
+        header_remove('Content-Type');
+        exit;
+    }
+
+    http_response_code(200);
+    header('Content-Type: application/json; charset=utf-8');
+    echo $json;
+    exit;
 }
 
 function action_file(): void

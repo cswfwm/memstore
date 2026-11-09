@@ -160,6 +160,66 @@ curl -X POST 'http://cswfwm.ccwu.cc/api/index.php?action=upload' \
 
 扩展名取原始文件名，非法时按 MIME 映射（`text/plain→txt`、`text/markdown→md`、`application/json→json`、`image/png→png` 等），无法判断则用 `bin`。下载响应带 `X-Content-Type-Options: nosniff`，并以附件形式返回，避免被浏览器当作页面执行。
 
+## 4.1 批量上传（省 hits 推荐）
+
+一次 HTTP 请求写入多条纯文本记忆，等价于 N 次 `upload` 但只消耗 1 个 hits。适合会话结束后一次性落盘多条记忆。
+
+```
+POST /api/index.php?action=batch_upload
+X-Api-Token: <token>
+Content-Type: application/json
+```
+
+```json
+{
+  "items": [
+    { "content": "用户偏好中文回复", "filename": "pref.txt", "category": "preference", "tags": "lang" },
+    { "content": "项目使用 PHP 8.4 + MySQL", "filename": "env.txt", "category": "tech" },
+    { "content": "第三条记忆", "title": "自定义标题", "category": "session" }
+  ]
+}
+```
+
+| 字段 | 必填 | 说明 |
+| --- | --- | --- |
+| `items` | 是 | 数组，1–50 条 |
+| `items[].content` | 是 | 文本内容（仅支持文本，文件请用 `upload`） |
+| `items[].filename` | 否 | 落盘文件名，决定扩展名，默认 `note.txt` |
+| `items[].title` | 否 | 标题，默认取文件名 |
+| `items[].category` | 否 | 分类，规则同 `upload`，默认 `general` |
+| `items[].tags` | 否 | 标签串 |
+
+单条上限 20 MB，整批合计上限 80 MB。部分成功也会返回，逐条给出结果：
+
+```json
+{
+  "created_count": 2,
+  "failed_count": 1,
+  "created": [
+    { "index": 0, "uuid": "…", "title": "pref", "category": "preference" },
+    { "index": 1, "uuid": "…", "title": "env", "category": "tech" }
+  ],
+  "failed": [
+    { "index": 2, "error": "missing_content" }
+  ]
+}
+```
+
+### 客户端示例
+
+```bash
+cat > items.json <<'JSON'
+{"items":[
+  {"content":"用户偏好中文","filename":"pref.txt","category":"preference"},
+  {"content":"今天完成了域名绑定","filename":"log.txt","category":"log","tags":"daily"}
+]}
+JSON
+
+python3 client.py batch_upload --file items.json
+```
+
+---
+
 ## 5. 列出记忆
 
 ```
@@ -174,6 +234,8 @@ X-Api-Token: <token>
 | `offset` | 偏移量，默认 0 |
 
 返回仅包含当前令牌所属用户的记录，按上传时间倒序。
+
+响应头带 `ETag` 与 `Cache-Control: private, max-age=0, must-revalidate`。下次请求带上 `If-None-Match: <etag>`，内容未变时服务端返回 `304 Not Modified` 且无响应体，客户端可复用本地缓存。
 
 ```json
 {
@@ -249,6 +311,8 @@ GET /api/index.php?action=health
 - 密码仅存 BCrypt 哈希；令牌与 `keycode` 校验码仅存 SHA-256 哈希，明文只在签发时返回一次。
 - 主机每日 50000 hits 限额，一次 API 调用消耗 1 hit；使用 `client.py` 的默认 UA 可保持单请求，勿用浏览器式 UA 触发挑战页。
 - 页面样式已内联进 HTML，首页不再额外请求 CSS，减少 hits 消耗。
+- 批量写入用 `batch_upload`：N 条记忆 1 次请求，省 hits。
+- 列表查询支持 `ETag` / `304`：内容未变时不产生响应体，适合轮询。
 - 该主机的反向代理会剥离 `Authorization` 头，因此令牌统一用自定义头 `X-Api-Token` 传递；也支持 `?token=` 查询参数（便于浏览器内调试，但会出现在访问日志中）。
 - 登录需用户名、密码、校验码三要素齐全，缺任一项均不能登录。
 - 所有查询按 `user_id` 隔离，跨用户访问返回 `404 not_found`。

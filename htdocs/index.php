@@ -118,7 +118,8 @@ footer { color: var(--muted); font-size: 13px; }
     <ol class="steps">
       <li><strong>注册</strong>：<code>POST ?action=register</code>（username / password / service_name / I），返回 <code>keycode</code> 校验码与 token。</li>
       <li><strong>上传</strong>：<code>POST ?action=upload</code>，带 <code>X-Api-Token: &lt;token&gt;</code> 与 <code>file</code>、<code>category</code>、<code>tags</code>。</li>
-      <li><strong>检索</strong>：<code>GET ?action=list&amp;category=…</code>，用 <code>?action=file&amp;uuid=…</code> 下载。</li>
+      <li><strong>批量写入</strong>：<code>POST ?action=batch_upload</code>，一次请求写最多 50 条，只消耗 1 个 hits。</li>
+      <li><strong>检索</strong>：<code>GET ?action=list&amp;category=…</code>，用 <code>?action=file&amp;uuid=…</code> 下载；支持 ETag，未变更时返回 304。</li>
     </ol>
     <p class="note">登录需三要素：用户名 + 密码 + 注册时返回的 <code>keycode</code>（128 位校验码，仅返回一次，请自行保存）。
     </ol>

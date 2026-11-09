@@ -9,6 +9,7 @@
   python3 client.py login
   python3 client.py upload --file ./notes.md --category session --tags agent,summary
   python3 client.py list --category session
+  python3 client.py batch_upload --file items.json   # 一次请求写多条，省 hits
   python3 client.py download --uuid <uuid> --out ./out.md
 
 说明：该主机在应用前有一层 JS 校验（写入 __test cookie），普通浏览器请求会先拿到挑战页。
@@ -165,6 +166,16 @@ def cmd_upload(args):
     print(status, json.dumps(body, ensure_ascii=False, indent=2))
 
 
+def cmd_batch_upload(args):
+    token = os.environ.get('MEMSTORE_TOKEN') or ''
+    if not token:
+        sys.exit('请先设置 MEMSTORE_TOKEN')
+    payload = json.load(open(args.file, encoding='utf-8'))
+    items = payload['items'] if isinstance(payload, dict) else payload
+    status, body, _ = request('POST', 'batch_upload', token=token, data={'items': items})
+    print(status, json.dumps(body, ensure_ascii=False, indent=2))
+
+
 def cmd_list(args):
     token = os.environ.get('MEMSTORE_TOKEN') or ''
     if not token:
@@ -211,6 +222,11 @@ def main():
     p.add_argument('--title')
     p.add_argument('--tags')
     p.set_defaults(func=cmd_upload)
+
+    p = sub.add_parser('batch_upload')
+    p.add_argument('--file', required=True,
+                   help='JSON 文件：{"items":[{"content":"...","filename":"a.txt","category":"x","title":"...","tags":"..."}]}')
+    p.set_defaults(func=cmd_batch_upload)
 
     p = sub.add_parser('list')
     p.add_argument('--category')

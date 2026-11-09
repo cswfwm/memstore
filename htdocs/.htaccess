@@ -8,6 +8,11 @@ Options -Indexes
     Require all denied
 </FilesMatch>
 
+# 压缩文本响应，减少传输字节（不减少 hits）
+<IfModule mod_deflate.c>
+    AddOutputFilterByType DEFLATE text/plain text/html text/markdown text/css application/json text/xml application/xml
+</IfModule>
+
 <IfModule mod_headers.c>
     Header always set X-Content-Type-Options "nosniff"
 </IfModule>
