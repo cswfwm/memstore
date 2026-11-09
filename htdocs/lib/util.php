@@ -1,6 +1,11 @@
 <?php
 declare(strict_types=1);
 
+if (defined('MEMSTORE_UTIL')) {
+    return;
+}
+define('MEMSTORE_UTIL', true);
+
 function respond(int $status, array $data): void
 {
     http_response_code($status);

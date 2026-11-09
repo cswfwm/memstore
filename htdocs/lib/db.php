@@ -1,6 +1,11 @@
 <?php
 declare(strict_types=1);
 
+if (defined('MEMSTORE_DB')) {
+    return;
+}
+define('MEMSTORE_DB', true);
+
 function db(): PDO
 {
     static $pdo = null;

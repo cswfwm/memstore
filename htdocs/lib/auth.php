@@ -1,6 +1,11 @@
 <?php
 declare(strict_types=1);
 
+if (defined('MEMSTORE_AUTH')) {
+    return;
+}
+define('MEMSTORE_AUTH', true);
+
 function issue_token(PDO $pdo, int $userId): array
 {
     $token = bin2hex(random_bytes(32));

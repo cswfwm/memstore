@@ -2,7 +2,7 @@
 declare(strict_types=1);
 
 require __DIR__ . '/lib/bootstrap.php';
-require __DIR__ . '/lib/ratelimit.php';
+require_once __DIR__ . '/lib/ratelimit.php';
 
 ratelimit_guard('panel');
 
@@ -101,6 +101,9 @@ footer { color: var(--muted); font-size: 13px; }
   <h1>MemStore</h1>
   <p class="tagline">AI 记忆文件的集中存储服务：注册登录后按标准格式上传，自动分类归档。</p>
   <nav>
+    <a href="files.php">我的记忆</a>
+    <a href="login.php">登录</a>
+    <a href="register.php">注册</a>
     <a href="api.md.php">上传规范</a>
     <a href="<?= htmlspecialchars($apiUrl) ?>?action=health">健康检查</a>
   </nav>
@@ -143,7 +146,7 @@ curl -X POST '<?= htmlspecialchars($apiUrl) ?>?action=upload' \
   -F 'filename=first.txt' -F 'category=general'
 
 # 再次登录（三要素）
-curl -X POST '<?= htmlspecialchars($apiUrl) ?>'?action=login' \
+curl -X POST '<?= htmlspecialchars($apiUrl) ?>?action=login' \
   -H 'Content-Type: application/json' \
   -d '{"username":"demo-agent","password":"demo12345","keycode":"<注册返回的 keycode>"}'</pre>
   </section>

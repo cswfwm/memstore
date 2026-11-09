@@ -1,6 +1,12 @@
 <?php
 declare(strict_types=1);
 
+// 防止被重复 require（web.php 也会引入本文件）
+if (defined('MEMSTORE_BOOTSTRAPPED')) {
+    return;
+}
+define('MEMSTORE_BOOTSTRAPPED', true);
+
 $configFile = dirname(__DIR__) . '/config.php';
 if (!is_file($configFile)) {
     http_response_code(500);

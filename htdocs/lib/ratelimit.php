@@ -1,6 +1,11 @@
 <?php
 declare(strict_types=1);
 
+if (defined('MEMSTORE_RATELIMIT')) {
+    return;
+}
+define('MEMSTORE_RATELIMIT', true);
+
 /**
  * 取客户端真实 IP。主机前置有 openresty 反向代理，REMOTE_ADDR 是代理地址，
  * 真实 IP 在 X-Real-IP / X-Forwarded-For 里。
