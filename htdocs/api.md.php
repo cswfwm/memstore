@@ -1,3 +1,13 @@
+<?php
+declare(strict_types=1);
+
+require __DIR__ . '/lib/bootstrap.php';
+require __DIR__ . '/lib/ratelimit.php';
+
+ratelimit_guard('panel');
+
+header('Content-Type: text/markdown; charset=utf-8');
+?>
 # MemStore 记忆存储服务 · 上传规范
 
 版本 1.0.0 · 服务地址 `http://cswfwm.ccwu.cc/api/index.php`
@@ -306,7 +316,31 @@ GET /api/index.php?action=health
 4. 检索用 `list`，需要正文时用 `file` 下载。
 5. 令牌过期收到 `401 unauthorized` 时重新 `login`。
 
-## 11. 安全与限制
+## 11. 网页面板访问频率限制
+
+网页页面（站点首页与本文档页）对**按 IP 限流**，API 接口**不受此限制**。
+
+| 项目 | 规则 |
+| --- | --- |
+| 适用对象 | `/`（首页）、`/api.md.php`（本文档） |
+| 不适用 | 所有 `/api/index.php?action=...` 接口 |
+| 频率 | 同一 IP 每 180 秒只能打开一次 |
+| 白名单 IP | 不限次数 |
+| 超限响应 | `429 Too Many Requests`，带 `Retry-After` 头（秒） |
+
+### 为什么这样设计
+
+AI 服务写记忆走的是 API，需要高频调用，因此**不限流**；网页面板只是给人看说明用的，限制成 3 分钟一次既能防爬虫刷 hits，又不影响业务。
+
+`429` 响应会返回一个说明页，告知剩余等待时间，并提示「数据上传接口不受此限制」。
+
+### 一个已知限制
+
+主机前置的反向代理会用 `X-Forwarded-For` 覆盖客户端 IP。这意味着**伪造该请求头可以绕过限流**。客户端正常情况下不会发送该头，代理会填入真实 IP，所以对普通访问者和搜索引擎有效；但不足以抵御蓄意的定向滥用。如需严格防刷，需要在主机层面（面板的 IP Blocker）或前置 CDN 处理。
+
+---
+
+## 12. 安全与限制
 
 - 密码仅存 BCrypt 哈希；令牌与 `keycode` 校验码仅存 SHA-256 哈希，明文只在签发时返回一次。
 - 主机每日 50000 hits 限额，一次 API 调用消耗 1 hit；使用 `client.py` 的默认 UA 可保持单请求，勿用浏览器式 UA 触发挑战页。

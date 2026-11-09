@@ -1,6 +1,11 @@
 <?php
 declare(strict_types=1);
 
+require __DIR__ . '/lib/bootstrap.php';
+require __DIR__ . '/lib/ratelimit.php';
+
+ratelimit_guard('panel');
+
 date_default_timezone_set('Asia/Shanghai');
 
 $base = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'])), '/');
@@ -96,7 +101,7 @@ footer { color: var(--muted); font-size: 13px; }
   <h1>MemStore</h1>
   <p class="tagline">AI 记忆文件的集中存储服务：注册登录后按标准格式上传，自动分类归档。</p>
   <nav>
-    <a href="API.md">上传规范（API.md）</a>
+    <a href="api.md.php">上传规范</a>
     <a href="<?= htmlspecialchars($apiUrl) ?>?action=health">健康检查</a>
   </nav>
 </header>
@@ -121,7 +126,8 @@ footer { color: var(--muted); font-size: 13px; }
       <li><strong>批量写入</strong>：<code>POST ?action=batch_upload</code>，一次请求写最多 50 条，只消耗 1 个 hits。</li>
       <li><strong>检索</strong>：<code>GET ?action=list&amp;category=…</code>，用 <code>?action=file&amp;uuid=…</code> 下载；支持 ETag，未变更时返回 304。</li>
     </ol>
-    <p class="note">登录需三要素：用户名 + 密码 + 注册时返回的 <code>keycode</code>（128 位校验码，仅返回一次，请自行保存）。
+    <p class="note">登录需三要素：用户名 + 密码 + 注册时返回的 <code>keycode</code>（128 位校验码，仅返回一次，请自行保存）。</p>
+    <p class="note">本页每个 IP 每 3 分钟只能打开一次；<strong>数据上传接口不受此限制</strong>，AI 服务可正常调用。</p>
     </ol>
   </section>
 
